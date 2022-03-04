@@ -1,20 +1,24 @@
 FROM node:14-buster-slim
 
 # Needed for npm dependencies
-RUN apt-get update && \
-    apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.7 \
     make \
     gcc \
     g++ \
     git \
-    curl
-
+    curl \
+    && apt-get clean autoclean \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /var/cache/apt/archives/*.deb
+  
 ENV PYTHON="/usr/bin/python3.7"
 
 # Install dependencies
-RUN mkdir -p /opt
+
 WORKDIR /opt
+
 COPY package.json .
 COPY yarn.lock .
 # Workaround for an issue with yarn and git
@@ -28,9 +32,10 @@ COPY contracts contracts
 COPY scripts scripts
 COPY deployments/localhost deployments/localhost
 
-EXPOSE 8545
+EXPOSE 8545 3000
 
-HEALTHCHECK --interval=10s --timeout=15s --start-period=60s --retries=6 CMD curl -f http://localhost:8545/ || exit 1
+HEALTHCHECK --interval=10s --timeout=15s --start-period=60s --retries=6 \
+  CMD curl -f http://localhost:3000 || exit 1
 
 # Run the node by default
 ENTRYPOINT yarn run start
