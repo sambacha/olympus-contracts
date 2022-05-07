@@ -1,21 +1,74 @@
-name: Slither Analysis
-on: [pull_request]
+
+name: slither
+
+on:
+  push:
+    paths:
+      - "**.sol"
+      - ".github/workflows/slither.yml"
+
+  pull_request_target:
+    branches:
+    - main
+    - develop
+
+# ensure permissions are explicitly defined
+# by configuring one we disable the remaining permissions
+# see: https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions#jobsjob_idpermissions
+# permissions:
+#  contents: read
+
+# ensure multiple CI processes are not running analysis on contracts
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request_target' && github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+
+env:
+  CI: true
+  COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
+  PULL_NUMBER: ${{ github.event.pull_request.number }}
+  RUN_ID: ${{ github.run_id }}
+  FORCE_COLOR: 2
+
 jobs:
-    analyze:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v2
-            # We receive an EACCESS permission denied error if we leave dependency installation
-            # to the slither action
-            - name: Install dependencies
-              run: yarn install --frozen-lockfile
-            - uses: crytic/slither-action@v0.1.1
-              name: Perform Slither Analysis
-              id: slither
-              continue-on-error: true
-              with:
-                  sarif: results.sarif
-     - name: Run analysis
+  slither:
+    runs-on: ubuntu-latest
+    outputs:
+      SLITHER_COVERAGE: ${{ steps.slither-analysis.outputs.SLITHER_COVERAGE }}
+      
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["14.x"]
+        os: ["ubuntu-latest"]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Nodejs 14.x
+        uses: actions/setup-node@v2
+        with:
+          node-version: "14.x"
+          check-latest: true
+          always-auth: true
+          registry-url: https://registry.npmjs.org
+#          cache: 'yarn' dont cache for this workflow
+
+      - name: Install Hardhat
+        id: compile
+        run: |
+          yarn install
+          npx hardhat compile
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+
+      - name: Install Slither
+        run: pip3 install slither-analyzer
+      - name: Prepare output
+        run: |
+          mkdir -p .github/slither-output
+      - name: Run analysis
         id: analysis
         shell: bash
         run: |
@@ -56,8 +109,14 @@ jobs:
           echo "Slither Analysis $FOUND_WARNINGS issues"
           if [[ $FOUND_WARNINGS -gt $FALSE_POSITIVE_WARNINGS ]]; then echo "$FOUND_WARNINGS issues exceeds limit" >&2; exit 0; fi
           echo "::endgroup::"
-          
-        - name: Upload SARIF file
-          uses: github/codeql-action/upload-sarif@v1
-          with:
-              sarif_file: ${{ steps.slither.outputs.sarif }}
+# NOTE: we `exit 0` as these are warnings, not failures
+# Found warnings creates a coverage badge
+# parameters are adjustable. 
+#
+# Alternative to the color output:
+#
+#            then
+#              echo "::set-output name=IS_PASSING::true"
+#            else
+#              echo "::set-output name=IS_PASSING::false"
+#         fi
